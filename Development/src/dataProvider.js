@@ -109,6 +109,11 @@ const encodeRQLRational = value => {
 
 const encodeRQLSampling = value => 'sampling:' + encodeRQLNameChars(value);
 
+// Escape special regex characters so user input is treated as literal text
+const escapeRegexSpecialChars = str => {
+    return str.replace(/[\\^$.|?*+()[\]{}]/g, '\\$&');
+};
+
 const encodeRQLKeyValueFilter = (key, value) => {
     const values = Array.isArray(value) ? value : [value];
     const terms = [];
@@ -121,8 +126,10 @@ const encodeRQLKeyValueFilter = (key, value) => {
             for (const matchValue of encodedValue) {
                 // ignore empty strings
                 if (value.length > 0) {
+                    // Escape regex special characters so the user input is treated as literal text
+                    const escapedValue = escapeRegexSpecialChars(matchValue);
                     terms.push(
-                        'matches(' + key + ',string:' + matchValue + ',i)'
+                        'matches(' + key + ',string:' + escapedValue + ',i)'
                     );
                 }
             }
@@ -557,6 +564,44 @@ const convertDataProviderRequestToHTTP = (
                     }
                 }
             }
+            // optional parameters. Must be declared in $constraints to be sent
+            const constrainedKeys = new Set([
+                'fec_enabled',
+                'fec_destination_ip',
+                'fec_type',
+                'fec_mode',
+                'fec_block_width',
+                'fec_block_height',
+                'fec1D_destination_port',
+                'fec2D_destination_port',
+                'fec1D_source_port',
+                'fec2D_source_port',
+                'rtcp_enabled',
+                'rtcp_destination_ip',
+                'rtcp_destination_port',
+                'rtcp_source_port'
+            ]);
+
+            differences = differences.filter(diff => {
+                const path = diff.path;
+
+                if (!Array.isArray(path) || path.length < 1) {
+                    return true;
+                }
+
+                const key = path[path.length - 1];
+
+                // Only check/remove for the keys in constrainedKeys
+                if (!constrainedKeys.has(key)) {
+                    return true;
+                }
+
+                const index = path[path.length - 2];
+                const constraintItem = params?.previousData?.$constraints?.[index];
+
+                return !!constraintItem &&
+                    Object.prototype.hasOwnProperty.call(constraintItem, key);
+            });
 
             let patchData = { transport_params: [] };
             const legs = get(params, 'data.$staged.transport_params').length;
